@@ -1,0 +1,2 @@
+# Place TLS certificates (fullchain.pem, privkey.pem) here for Nginx.
+# Never commit private keys to Git.

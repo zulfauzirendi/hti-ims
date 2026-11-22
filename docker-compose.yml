@@ -1,0 +1,87 @@
+# ==============================================================================
+# PT HTI Tool & Equipment Inventory System — Production Hybrid Docker Compose
+# Kompatibel untuk Cloud VPS maupun Server On-Premise PT HTI (SRS-QAL-019)
+# ==============================================================================
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: hti_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-hti_inventory}
+      POSTGRES_USER: ${POSTGRES_USER:-hti_migrator}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      APP_DB_USER: ${APP_DB_USER:-hti_app}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?APP_DB_PASSWORD is required}
+      TZ: ${TZ:-Asia/Jakarta}
+    volumes:
+      - hti_pg_data:/var/lib/postgresql/data
+      - ./infra/scripts/init_db_roles.sh:/docker-entrypoint-initdb.d/10_init_db_roles.sh:ro
+    networks:
+      - hti_internal_net # Port 5432 TIDAK diekspos ke publik (SRS-SEC-013)
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-hti_migrator} -d ${POSTGRES_DB:-hti_inventory}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: hti_api
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - hti_evidence_data:/app/storage/evidence
+    networks:
+      - hti_internal_net
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  nginx:
+    image: nginx:1.26-alpine
+    container_name: hti_nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infra/certs:/etc/nginx/certs:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - hti_edge_net
+      - hti_internal_net
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+networks:
+  hti_edge_net:
+  hti_internal_net:
+    internal: true
+
+volumes:
+  hti_pg_data:
+  hti_evidence_data:
+  hti_backup_data:

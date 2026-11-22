@@ -1,0 +1,11 @@
+# ==============================================================================
+# Development Override — Mengekspos PostgreSQL HANYA pada 127.0.0.1:5432
+# Jalankan: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+# ==============================================================================
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:5432:5432"
+    networks:
+      - hti_internal_net
+      - hti_edge_net
