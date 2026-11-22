@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,10 +7,16 @@ import '../models/inventory_models.dart';
 
 const String _kServerBaseUrlKey = 'hti_server_base_url';
 
-/// Default endpoint: localhost saat debug, domain produksi PT HTI saat release.
-/// Pengguna dapat mengubahnya kapan saja (On-Premise LAN <-> Cloud VPS) tanpa rebuild (SRS-ADP-001).
-String get defaultServerBaseUrl =>
-    kDebugMode ? 'http://127.0.0.1:3000' : 'https://inv.hti.co.id';
+/// Default endpoint:
+/// - Android Studio Emulator (debug): http://10.0.2.2:3000 (mapping host localhost:3000)
+/// - Desktop Linux/Windows (debug): http://127.0.0.1:3000
+/// - Release production: https://inv.hti.co.id
+/// Dapat diubah kapan saja tanpa rebuild (SRS-ADP-001).
+String get defaultServerBaseUrl {
+  if (!kDebugMode) return 'https://inv.hti.co.id';
+  if (!kIsWeb && Platform.isAndroid) return 'http://10.0.2.2:3000';
+  return 'http://127.0.0.1:3000';
+}
 
 String normalizeServerUrl(String raw) {
   var cleaned = raw.trim();

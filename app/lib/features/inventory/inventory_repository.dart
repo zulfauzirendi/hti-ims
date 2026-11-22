@@ -266,6 +266,93 @@ class InventoryRepository {
       throw ApiException.fromDio(e);
     }
   }
+
+  Future<void> updateMasterItem({
+    required int itemId,
+    required int categoryId,
+    required String description,
+    String? specification,
+    required String unit,
+  }) async {
+    try {
+      await _dio.patch<Map<String, dynamic>>(
+        '/api/v1/items/$itemId',
+        data: {
+          'categoryId': categoryId,
+          'description': description.trim(),
+          'specification':
+              (specification != null && specification.trim().isNotEmpty) ? specification.trim() : null,
+          'unit': unit,
+        },
+      );
+    } on DioException catch (e) {
+      throw ApiException.fromDio(e);
+    }
+  }
+
+  Future<void> softDeleteMasterItem(int itemId) async {
+    try {
+      await _dio.delete<Map<String, dynamic>>('/api/v1/items/$itemId');
+    } on DioException catch (e) {
+      throw ApiException.fromDio(e);
+    }
+  }
+
+  Future<void> createCategory({required String code, required String name}) async {
+    try {
+      await _dio.post<Map<String, dynamic>>(
+        '/api/v1/categories',
+        data: {'code': code.trim().toUpperCase(), 'name': name.trim().toUpperCase()},
+      );
+    } on DioException catch (e) {
+      throw ApiException.fromDio(e);
+    }
+  }
+
+  Future<void> updateCategory({required int id, required String name}) async {
+    try {
+      await _dio.patch<Map<String, dynamic>>(
+        '/api/v1/categories/$id',
+        data: {'name': name.trim().toUpperCase()},
+      );
+    } on DioException catch (e) {
+      throw ApiException.fromDio(e);
+    }
+  }
+
+  Future<void> createLocation({
+    required String code,
+    required String name,
+    required String locationType,
+  }) async {
+    try {
+      await _dio.post<Map<String, dynamic>>(
+        '/api/v1/locations',
+        data: {
+          'code': code.trim().toUpperCase(),
+          'name': name.trim(),
+          'locationType': locationType,
+        },
+      );
+    } on DioException catch (e) {
+      throw ApiException.fromDio(e);
+    }
+  }
+
+  Future<void> updateLocation({
+    required int id,
+    required String name,
+    required String locationType,
+  }) async {
+    try {
+      await _dio.patch<Map<String, dynamic>>(
+        '/api/v1/locations/$id',
+        data: {'name': name.trim(), 'locationType': locationType},
+      );
+    } on DioException catch (e) {
+      throw ApiException.fromDio(e);
+    }
+  }
 }
 
 final inventoryRepositoryProvider = Provider<InventoryRepository>((ref) {

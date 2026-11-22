@@ -918,3 +918,143 @@ Future<bool?> showCreateItemModal(
     },
   );
 }
+
+/// Modal Edit Master Item (Khusus SUPER_ADMIN)
+Future<bool?> showEditItemModal(
+  BuildContext context,
+  WidgetRef ref,
+  InventoryItem item,
+  List<CategoryRef> categories,
+) {
+  final descCtrl = TextEditingController(text: item.description);
+  final specCtrl = TextEditingController(text: item.specification ?? '');
+  int catId = item.category.id;
+  String unit = _allowedUnits.contains(item.unit) ? item.unit : 'UNIT';
+
+  return showDialog<bool>(
+    context: context,
+    builder: (ctx) {
+      var busy = false;
+      String? error;
+      return StatefulBuilder(
+        builder: (ctx, setState) => AlertDialog(
+          title: Text('Edit Master Item • ${item.itemCode}'),
+          content: SizedBox(
+            width: 440,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (error != null) ...[
+                  Text(error!, style: const TextStyle(color: HtiColors.statusBroken, fontSize: 12.5)),
+                  const SizedBox(height: 8),
+                ],
+                DropdownButtonFormField<int>(
+                  initialValue: catId,
+                  decoration: const InputDecoration(labelText: 'Kategori'),
+                  items: [
+                    for (final c in categories)
+                      DropdownMenuItem(value: c.id, child: Text('${c.code} — ${c.name}')),
+                  ],
+                  onChanged: (v) => setState(() => catId = v!),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: descCtrl,
+                  decoration: const InputDecoration(labelText: 'Deskripsi / Nama Alat'),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: specCtrl,
+                  decoration: const InputDecoration(labelText: 'Spesifikasi / Merk (Opsional)'),
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  initialValue: unit,
+                  decoration: const InputDecoration(labelText: 'Satuan Standar'),
+                  items: [for (final u in _allowedUnits) DropdownMenuItem(value: u, child: Text(u))],
+                  onChanged: (v) => setState(() => unit = v!),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: busy ? null : () => Navigator.pop(ctx, false), child: const Text('Batal')),
+            ElevatedButton(
+              onPressed: busy
+                  ? null
+                  : () async {
+                      if (descCtrl.text.trim().length < 2) {
+                        setState(() => error = 'Deskripsi minimal 2 karakter.');
+                        return;
+                      }
+                      setState(() {
+                        busy = true;
+                        error = null;
+                      });
+                      try {
+                        await ref.read(inventoryRepositoryProvider).updateMasterItem(
+                              itemId: item.id,
+                              categoryId: catId,
+                              description: descCtrl.text,
+                              specification: specCtrl.text,
+                              unit: unit,
+                            );
+                        ref.invalidate(inventorySearchProvider);
+                        ref.invalidate(dashboardSummaryProvider);
+                        if (ctx.mounted) Navigator.pop(ctx, true);
+                      } catch (e) {
+                        setState(() {
+                          busy = false;
+                          error = e.toString();
+                        });
+                      }
+                    },
+              child: Text(busy ? 'Menyimpan...' : 'Simpan Perubahan'),
+            ),
+          ],
+        ),
+      );
+    },
+  );
+}
+
+/// Konfirmasi 2 Langkah Soft-Delete Master Item (Khusus SUPER_ADMIN — SRS-SAF-004)
+Future<void> confirmSoftDeleteItem(
+  BuildContext context,
+  WidgetRef ref,
+  InventoryItem item,
+) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: Text('Nonaktifkan (Soft Delete) ${item.itemCode}?'),
+      content: Text(
+        'Item "${item.description}" akan dinonaktifkan dari pencarian aktif (riwayat audit ISO 9001 tetap terjaga). '
+        'Penghapusan hanya berhasil jika seluruh saldo stok = 0.',
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(backgroundColor: HtiColors.statusBroken),
+          onPressed: () => Navigator.pop(ctx, true),
+          child: const Text('Ya, Nonaktifkan Item'),
+        ),
+      ],
+    ),
+  );
+  if (confirmed != true) return;
+  try {
+    await ref.read(inventoryRepositoryProvider).softDeleteMasterItem(item.id);
+    ref.invalidate(inventorySearchProvider);
+    ref.invalidate(dashboardSummaryProvider);
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Item ${item.itemCode} berhasil dinonaktifkan (soft delete).')),
+      );
+    }
+  } catch (e) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Gagal: $e')));
+    }
+  }
+}

@@ -205,6 +205,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                           item: result.items[idx],
                           user: user,
                           allLocations: locations,
+                          allCategories: categories,
                         ),
                       ),
                     ),
@@ -259,11 +260,13 @@ class _InventoryItemCard extends ConsumerWidget {
     required this.item,
     required this.user,
     required this.allLocations,
+    required this.allCategories,
   });
 
   final InventoryItem item;
   final UserProfile? user;
   final List<LocationRef> allLocations;
+  final List<CategoryRef> allCategories;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -329,6 +332,25 @@ class _InventoryItemCard extends ConsumerWidget {
           ),
         ),
         children: [
+          if (user?.isSuperAdmin ?? false) ...[
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton.icon(
+                  onPressed: () => showEditItemModal(context, ref, item, allCategories),
+                  icon: const Icon(Icons.edit_outlined, size: 16),
+                  label: const Text('Edit Master Item'),
+                ),
+                const SizedBox(width: 8),
+                TextButton.icon(
+                  style: TextButton.styleFrom(foregroundColor: HtiColors.statusBroken),
+                  onPressed: () => confirmSoftDeleteItem(context, ref, item),
+                  icon: const Icon(Icons.delete_outline, size: 16),
+                  label: const Text('Nonaktifkan Item'),
+                ),
+              ],
+            ),
+          ],
           const Divider(),
           // Breakdown 4 Lokasi Operasional
           for (final st in item.stocks)
