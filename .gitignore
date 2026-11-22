@@ -1,0 +1,55 @@
+# Environment & Secrets (SRS-SEC-015)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+*.jks
+key.properties
+infra/certs/*
+!infra/certs/.gitkeep
+
+# Backups & Local Media Evidence
+*.dump
+*.dump.enc
+*.tar.gz.enc
+*.sql.gz
+storage/
+backend/storage/
+
+# Node.js / TypeScript
+node_modules/
+dist/
+coverage/
+*.log
+npm-debug.log*
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Flutter / Dart / Android / Desktop Builds
+app/.dart_tool/
+app/build/
+app/.flutter-plugins
+app/.flutter-plugins-dependencies
+app/.packages
+app/android/local.properties
+*.apk
+*.aab
+
+# Internal Local Reference Files & Sensitive Company Spreadsheets
+2025 NEW ASSET TOOL & EQUIPMENT (2).xlsx
+master_agent_blueprint_planning_spec.md
+MIL_Std_SRS_Template.doc
+
+# OS & IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
