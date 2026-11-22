@@ -1,0 +1,221 @@
+// ==============================================================================
+// PT HTI Tool & Equipment Inventory System (HTI-TEIS)
+// Prisma Physical Schema — Aligned with SRS v1.1, HLD v1.0, LLD v1.0
+// ==============================================================================
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  directUrl  = env("DIRECT_DATABASE_URL")
+  extensions = [pg_trgm]
+}
+
+enum LocationType {
+  WAREHOUSE
+  SITE
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN_GUDANG
+  PETUGAS_LAPANGAN
+  VIEWER
+}
+
+enum ConditionStatus {
+  GOOD
+  SERVICE
+  BROKEN
+}
+
+enum TransferStatus {
+  IN_TRANSIT
+  RECEIVED
+  REJECTED
+  CANCELLED
+}
+
+enum StockActionType {
+  INITIAL_IMPORT
+  STATUS_CHANGE
+  STOCK_IN
+  DISPOSAL
+  TRANSFER_OUT
+  TRANSFER_IN
+  TRANSFER_REJECT
+  TRANSFER_CANCEL
+  REMARKS_UPDATE
+}
+
+model Category {
+  id        Int      @id @default(autoincrement())
+  code      String   @unique @db.VarChar(10)
+  name      String   @unique @db.VarChar(100)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  items Item[]
+
+  @@map("categories")
+}
+
+model Location {
+  id           Int          @id @default(autoincrement())
+  code         String       @unique @db.VarChar(20)
+  name         String       @unique @db.VarChar(100)
+  locationType LocationType @default(WAREHOUSE) @map("location_type")
+  isActive     Boolean      @default(true) @map("is_active")
+  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  users             User[]
+  stocks            ItemStock[]
+  outgoingTransfers StockTransfer[] @relation("TransferFrom")
+  incomingTransfers StockTransfer[] @relation("TransferTo")
+  logsFrom          StockLog[]      @relation("LogFromLocation")
+  logsTo            StockLog[]      @relation("LogToLocation")
+
+  @@map("locations")
+}
+
+model Item {
+  id            Int       @id @default(autoincrement())
+  itemCode      String    @unique @map("item_code") @db.VarChar(30)
+  categoryId    Int       @map("category_id")
+  description   String    @db.VarChar(255)
+  specification String?   @db.Text
+  unit          String    @db.VarChar(20)
+  isActive      Boolean   @default(true) @map("is_active")
+  deletedAt     DateTime? @map("deleted_at") @db.Timestamptz(6)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  category  Category        @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  stocks    ItemStock[]
+  transfers StockTransfer[]
+  logs      StockLog[]
+
+  @@index([categoryId], map: "idx_items_category")
+  @@map("items")
+}
+
+model User {
+  id                 Int      @id @default(autoincrement())
+  username           String   @unique @db.VarChar(50)
+  passwordHash       String   @map("password_hash") @db.VarChar(255)
+  fullName           String   @map("full_name") @db.VarChar(100)
+  role               UserRole
+  assignedLocationId Int?     @map("assigned_location_id")
+  mustChangePassword Boolean  @default(true) @map("must_change_password")
+  isActive           Boolean  @default(true) @map("is_active")
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  assignedLocation  Location?       @relation(fields: [assignedLocationId], references: [id], onDelete: SetNull)
+  refreshTokens     RefreshToken[]
+  updatedStocks     ItemStock[]
+  sentTransfers     StockTransfer[] @relation("TransferSender")
+  receivedTransfers StockTransfer[] @relation("TransferReceiver")
+  stockLogs         StockLog[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id         Int       @id @default(autoincrement())
+  userId     Int       @map("user_id")
+  familyId   String    @map("family_id") @db.Uuid
+  tokenHash  String    @unique @map("token_hash") @db.VarChar(64)
+  deviceInfo String?   @map("device_info") @db.VarChar(150)
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, familyId], map: "idx_refresh_tokens_user_family")
+  @@map("refresh_tokens")
+}
+
+model ItemStock {
+  id           Int      @id @default(autoincrement())
+  itemId       Int      @map("item_id")
+  locationId   Int      @map("location_id")
+  qtyGood      Int      @default(0) @map("qty_good")
+  qtyService   Int      @default(0) @map("qty_service")
+  qtyBroken    Int      @default(0) @map("qty_broken")
+  qtyInTransit Int      @default(0) @map("qty_in_transit")
+  jobCode      String?  @map("job_code") @db.VarChar(255)
+  remarks      String?  @db.Text
+  version      Int      @default(1)
+  updatedById  Int?     @map("updated_by")
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  item      Item     @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  location  Location @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  updatedBy User?    @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@unique([itemId, locationId], map: "unique_item_location")
+  @@index([locationId], map: "idx_item_stocks_location")
+  @@map("item_stocks")
+}
+
+model StockTransfer {
+  id              Int             @id @default(autoincrement())
+  transferCode    String          @unique @map("transfer_code") @db.VarChar(40)
+  itemId          Int             @map("item_id")
+  fromLocationId  Int             @map("from_location_id")
+  toLocationId    Int             @map("to_location_id")
+  conditionStatus ConditionStatus @default(GOOD) @map("condition_status")
+  qty             Int
+  status          TransferStatus  @default(IN_TRANSIT)
+  jobCode         String?         @map("job_code") @db.VarChar(255)
+  senderNote      String?         @map("sender_note") @db.Text
+  receiverNote    String?         @map("receiver_note") @db.Text
+  sentById        Int             @map("sent_by")
+  receivedById    Int?            @map("received_by")
+  sentAt          DateTime        @default(now()) @map("sent_at") @db.Timestamptz(6)
+  resolvedAt      DateTime?       @map("resolved_at") @db.Timestamptz(6)
+
+  item         Item       @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  fromLocation Location   @relation("TransferFrom", fields: [fromLocationId], references: [id], onDelete: Restrict)
+  toLocation   Location   @relation("TransferTo", fields: [toLocationId], references: [id], onDelete: Restrict)
+  sentBy       User       @relation("TransferSender", fields: [sentById], references: [id], onDelete: Restrict)
+  receivedBy   User?      @relation("TransferReceiver", fields: [receivedById], references: [id], onDelete: SetNull)
+  logs         StockLog[]
+
+  @@index([toLocationId, status], map: "idx_stock_transfers_incoming")
+  @@index([fromLocationId, status], map: "idx_stock_transfers_outgoing")
+  @@map("stock_transfers")
+}
+
+model StockLog {
+  id             Int             @id @default(autoincrement())
+  itemId         Int             @map("item_id")
+  fromLocationId Int?            @map("from_location_id")
+  toLocationId   Int?            @map("to_location_id")
+  actionType     StockActionType @map("action_type")
+  statusChanged  String?         @map("status_changed") @db.VarChar(40)
+  qtyChanged     Int             @map("qty_changed")
+  qtyBefore      Json?           @map("qty_before") @db.JsonB
+  qtyAfter       Json?           @map("qty_after") @db.JsonB
+  jobCode        String?         @map("job_code") @db.VarChar(255)
+  note           String?         @db.Text
+  photoUrl       String?         @map("photo_url") @db.VarChar(500)
+  transferId     Int?            @map("transfer_id")
+  userId         Int?            @map("user_id")
+  createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  item         Item           @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  fromLocation Location?      @relation("LogFromLocation", fields: [fromLocationId], references: [id], onDelete: Restrict)
+  toLocation   Location?      @relation("LogToLocation", fields: [toLocationId], references: [id], onDelete: Restrict)
+  transfer     StockTransfer? @relation(fields: [transferId], references: [id], onDelete: SetNull)
+  user         User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt(sort: Desc)], map: "idx_stock_logs_created_desc")
+  @@index([itemId, createdAt(sort: Desc)], map: "idx_stock_logs_item_created")
+  @@map("stock_logs")
+}
