@@ -4,10 +4,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hti_inventory_app/core/models/inventory_models.dart';
 import 'package:hti_inventory_app/core/models/user_model.dart';
 import 'package:hti_inventory_app/core/theme/app_theme.dart';
+import 'package:hti_inventory_app/features/auth/account_dialog.dart';
 import 'package:hti_inventory_app/features/auth/auth_controller.dart';
 import 'package:hti_inventory_app/features/dashboard/dashboard_repository.dart';
 import 'package:hti_inventory_app/features/dashboard/dashboard_screen.dart';
+import 'package:hti_inventory_app/features/inventory/inventory_providers.dart';
 import 'package:hti_inventory_app/features/inventory/stock_action_modals.dart';
+import 'package:hti_inventory_app/features/logs/audit_logs_screen.dart';
+import 'package:hti_inventory_app/features/logs/logs_repository.dart';
 import 'package:hti_inventory_app/features/transfers/transfers_repository.dart';
 import 'package:hti_inventory_app/features/transfers/transfers_screen.dart';
 
@@ -63,7 +67,6 @@ void main() {
       ),
     );
 
-    // Isi catatan valid tapi tanpa unggah foto bukti K3
     await tester.enterText(
       find.widgetWithText(TextFormField, 'Catatan Kondisi / Kerusakan (Wajib)'),
       'Kabel hoist terkelupas saat inspeksi',
@@ -91,10 +94,8 @@ void main() {
       ),
     );
 
-    // Awalnya GOOD -> tidak ada banner peringatan K3
     expect(find.textContaining('TIDAK LAYAK OPERASI'), findsNothing);
 
-    // Ubah kondisi ke BROKEN
     await tester.tap(find.text('GOOD'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('BROKEN').last);
@@ -240,7 +241,89 @@ void main() {
     expect(find.text('TRF-20261122-AB12CD'), findsOneWidget);
     expect(find.text('Konfirmasi Terima'), findsOneWidget);
     expect(find.text('Tolak'), findsOneWidget);
-    // Teknisi SITE-PTS bukan pengirim (WH-1) -> tidak boleh melihat tombol Batalkan Pengiriman
     expect(find.text('Batalkan Pengiriman'), findsNothing);
+  });
+
+  testWidgets('AuditLogsScreen renders active Export menu, Date Range chip, and before->after diff',
+      (tester) async {
+    final paged = PagedLogsResult(
+      page: 1,
+      limit: 25,
+      total: 1,
+      totalPages: 1,
+      items: [
+        StockLogEntry(
+          id: 99,
+          itemCode: 'HTI-SFT-0014',
+          itemDescription: 'Body Harnest HOC 2',
+          actionType: 'STATUS_CHANGE',
+          statusChanged: 'GOOD_TO_BROKEN',
+          qtyChanged: 1,
+          qtyBefore: const StockQtySnapshot(good: 10, service: 0, broken: 0, inTransit: 0),
+          qtyAfter: const StockQtySnapshot(good: 9, service: 0, broken: 1, inTransit: 0),
+          fromLocationName: 'Warehouse 1',
+          toLocationName: 'Warehouse 1',
+          note: 'Hook patah saat inspeksi K3',
+          photoUrl: '/api/v1/uploads/evidence/123e4567-e89b-12d3-a456-426614174000.webp',
+          userName: 'Admin WH1',
+          createdAt: DateTime(2026, 11, 25, 9, 30),
+        ),
+      ],
+    );
+
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          locationsProvider.overrideWith((ref) async => sampleLocations),
+          auditLogsProvider.overrideWith((ref) async => paged),
+        ],
+        child: MaterialApp(
+          theme: HtiTheme.light(),
+          home: const Scaffold(body: AuditLogsScreen()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Export Excel / PDF'), findsOneWidget);
+    expect(find.text('Filter Tanggal'), findsOneWidget);
+    expect(find.text('Good: 10→9 • Broken: 0→1'), findsOneWidget);
+    expect(find.text('Lihat Foto K3'), findsOneWidget);
+  });
+
+  testWidgets('AccountProfileDialog displays user profile and voluntary Change Password toggle',
+      (tester) async {
+    const hanif = UserProfile(
+      id: 6,
+      username: 'hanif',
+      fullName: 'Pak Hanif',
+      role: UserRole.viewer,
+      mustChangePassword: false,
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          authControllerProvider.overrideWith(() => _StubAuthController(hanif)),
+        ],
+        child: MaterialApp(
+          theme: HtiTheme.light(),
+          home: const Scaffold(body: AccountProfileDialog()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Pak Hanif'), findsOneWidget);
+    expect(find.text('Ganti Kata Sandi'), findsOneWidget);
+
+    await tester.tap(find.text('Ganti Kata Sandi'));
+    await tester.pumpAndSettle();
+    expect(find.text('Kata Sandi Saat Ini'), findsOneWidget);
+    expect(find.text('Kata Sandi Baru'), findsOneWidget);
   });
 }

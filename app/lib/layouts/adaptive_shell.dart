@@ -5,9 +5,11 @@ import 'package:go_router/go_router.dart';
 import '../core/models/user_model.dart';
 import '../core/network/dio_client.dart';
 import '../core/theme/app_theme.dart';
+import '../features/auth/account_dialog.dart';
 import '../features/auth/auth_controller.dart';
+import '../features/inventory/inventory_providers.dart';
 
-/// Provider angka badge transfer masuk IN_TRANSIT (akan dihubungkan ke Dashboard/Transfers di Fase 4)
+/// Provider angka badge transfer masuk IN_TRANSIT
 final pendingIncomingTransfersCountProvider = StateProvider<int>((ref) => 0);
 
 /// Breakpoint adaptif resmi sesuai HLD/LLD: >= 900dp DesktopShell, < 900dp MobileShell
@@ -39,7 +41,7 @@ const _allDesktopNav = [
     showTransferBadge: true,
   ),
   _NavItem(route: '/logs', label: 'Audit & Laporan', icon: Icons.fact_check_outlined),
-  _NavItem(route: '/users', label: 'Pengguna', icon: Icons.manage_accounts_outlined, superAdminOnly: true),
+  _NavItem(route: '/users', label: 'Admin & Master', icon: Icons.manage_accounts_outlined, superAdminOnly: true),
 ];
 
 const _mobileNav = [
@@ -79,6 +81,15 @@ class AdaptiveShell extends ConsumerWidget {
     final degraded = ref.watch(connectivityDegradedProvider);
     final pendingTransfers = ref.watch(pendingIncomingTransfersCountProvider);
 
+    void openAccount() {
+      showDialog<void>(context: context, builder: (_) => const AccountProfileDialog());
+    }
+
+    void triggerQuickSearch() {
+      context.go('/inventory');
+      ref.read(inventorySearchFocusSignalProvider.notifier).state++;
+    }
+
     return LayoutBuilder(
       builder: (context, constraints) {
         final isDesktop = constraints.maxWidth >= kDesktopBreakpoint;
@@ -110,7 +121,8 @@ class AdaptiveShell extends ConsumerWidget {
             user: user,
             pendingTransfers: pendingTransfers,
             badgeIconBuilder: _badgeIcon,
-            onLogout: () => ref.read(authControllerProvider.notifier).logout(),
+            onOpenAccount: openAccount,
+            onQuickSearch: triggerQuickSearch,
             child: contentWithBanner,
           );
         }
@@ -120,7 +132,7 @@ class AdaptiveShell extends ConsumerWidget {
           user: user,
           pendingTransfers: pendingTransfers,
           badgeIconBuilder: _badgeIcon,
-          onLogout: () => ref.read(authControllerProvider.notifier).logout(),
+          onOpenAccount: openAccount,
           child: contentWithBanner,
         );
       },
@@ -134,7 +146,8 @@ class _DesktopShell extends StatelessWidget {
     required this.user,
     required this.pendingTransfers,
     required this.badgeIconBuilder,
-    required this.onLogout,
+    required this.onOpenAccount,
+    required this.onQuickSearch,
     required this.child,
   });
 
@@ -142,7 +155,8 @@ class _DesktopShell extends StatelessWidget {
   final UserProfile? user;
   final int pendingTransfers;
   final Widget Function(IconData, int, bool) badgeIconBuilder;
-  final VoidCallback onLogout;
+  final VoidCallback onOpenAccount;
+  final VoidCallback onQuickSearch;
   final Widget child;
 
   @override
@@ -155,8 +169,8 @@ class _DesktopShell extends StatelessWidget {
 
     return CallbackShortcuts(
       bindings: {
-        // Pintasan keyboard Desktop Ctrl+K -> langsung buka pencarian inventaris (SRS-QAL-014)
-        const SingleActivator(LogicalKeyboardKey.keyK, control: true): () => context.go('/inventory'),
+        // Pintasan keyboard Desktop Ctrl+K -> buka /inventory + fokus otomatis ke kotak cari (SRS-QAL-014)
+        const SingleActivator(LogicalKeyboardKey.keyK, control: true): onQuickSearch,
       },
       child: Focus(
         autofocus: true,
@@ -166,11 +180,13 @@ class _DesktopShell extends StatelessWidget {
             actions: [
               if (user != null)
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
                   child: Center(
-                    child: Chip(
+                    child: ActionChip(
                       backgroundColor: HtiColors.navySurface,
                       side: BorderSide.none,
+                      avatar: const Icon(Icons.account_circle_outlined, color: Colors.white, size: 18),
+                      onPressed: onOpenAccount,
                       label: Text(
                         '${user!.fullName} • ${user!.role.displayLabel}'
                         '${user!.assignedLocation != null ? ' (${user!.assignedLocation!.code})' : ''}',
@@ -179,11 +195,6 @@ class _DesktopShell extends StatelessWidget {
                     ),
                   ),
                 ),
-              IconButton(
-                tooltip: 'Keluar',
-                onPressed: onLogout,
-                icon: const Icon(Icons.logout),
-              ),
               const SizedBox(width: 8),
             ],
           ),
@@ -219,7 +230,7 @@ class _MobileShell extends StatelessWidget {
     required this.user,
     required this.pendingTransfers,
     required this.badgeIconBuilder,
-    required this.onLogout,
+    required this.onOpenAccount,
     required this.child,
   });
 
@@ -227,7 +238,7 @@ class _MobileShell extends StatelessWidget {
   final UserProfile? user;
   final int pendingTransfers;
   final Widget Function(IconData, int, bool) badgeIconBuilder;
-  final VoidCallback onLogout;
+  final VoidCallback onOpenAccount;
   final Widget child;
 
   @override
@@ -249,10 +260,19 @@ class _MobileShell extends StatelessWidget {
           ],
         ),
         actions: [
+          if (user?.isSuperAdmin ?? false)
+            IconButton(
+              tooltip: 'Admin & Master Data',
+              onPressed: () => context.go('/users'),
+              icon: Icon(
+                Icons.manage_accounts_outlined,
+                color: currentPath.startsWith('/users') ? HtiColors.amberAccent : Colors.white,
+              ),
+            ),
           IconButton(
-            tooltip: 'Keluar',
-            onPressed: onLogout,
-            icon: const Icon(Icons.logout),
+            tooltip: 'Profil & Keamanan Akun',
+            onPressed: onOpenAccount,
+            icon: const Icon(Icons.account_circle_outlined),
           ),
         ],
       ),

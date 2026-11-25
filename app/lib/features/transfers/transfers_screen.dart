@@ -117,19 +117,27 @@ class TransfersScreen extends ConsumerWidget {
   }
 }
 
-class _TransferCard extends ConsumerWidget {
+class _TransferCard extends ConsumerStatefulWidget {
   const _TransferCard({required this.transfer, required this.user});
 
   final StockTransferItem transfer;
   final UserProfile? user;
 
-  void _refreshAll(WidgetRef ref) {
+  @override
+  ConsumerState<_TransferCard> createState() => _TransferCardState();
+}
+
+class _TransferCardState extends ConsumerState<_TransferCard> {
+  bool _busy = false;
+
+  void _refreshAll() {
     ref.invalidate(transfersListProvider);
     ref.invalidate(dashboardSummaryProvider);
     ref.invalidate(inventorySearchProvider);
   }
 
-  Future<void> _handleReceive(BuildContext context, WidgetRef ref) async {
+  Future<void> _handleReceive() async {
+    final transfer = widget.transfer;
     final noteCtrl = TextEditingController();
     final confirmed = await showDialog<bool>(
       context: context,
@@ -159,22 +167,31 @@ class _TransferCard extends ConsumerWidget {
       ),
     );
     if (confirmed != true) return;
+    setState(() => _busy = true);
     try {
       await ref.read(transfersRepositoryProvider).receive(transfer.id, receiverNote: noteCtrl.text);
-      _refreshAll(ref);
-      if (context.mounted) {
+      _refreshAll();
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Transfer ${transfer.transferCode} berhasil diterima.')),
+          SnackBar(
+            backgroundColor: HtiColors.statusGood,
+            content: Text('Transfer ${transfer.transferCode} berhasil diterima.'),
+          ),
         );
       }
     } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Gagal: $e')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(backgroundColor: HtiColors.statusBroken, content: Text('Gagal: $e')),
+        );
       }
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
-  Future<void> _handleReject(BuildContext context, WidgetRef ref) async {
+  Future<void> _handleReject() async {
+    final transfer = widget.transfer;
     final noteCtrl = TextEditingController();
     final confirmed = await showDialog<bool>(
       context: context,
@@ -206,17 +223,28 @@ class _TransferCard extends ConsumerWidget {
       ),
     );
     if (confirmed != true) return;
+    setState(() => _busy = true);
     try {
       await ref.read(transfersRepositoryProvider).reject(transfer.id, receiverNote: noteCtrl.text);
-      _refreshAll(ref);
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Gagal: $e')));
+      _refreshAll();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Transfer ${transfer.transferCode} ditolak dan dikembalikan ke asal.')),
+        );
       }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(backgroundColor: HtiColors.statusBroken, content: Text('Gagal: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
-  Future<void> _handleCancel(BuildContext context, WidgetRef ref) async {
+  Future<void> _handleCancel() async {
+    final transfer = widget.transfer;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -235,19 +263,32 @@ class _TransferCard extends ConsumerWidget {
       ),
     );
     if (confirmed != true) return;
+    setState(() => _busy = true);
     try {
       await ref.read(transfersRepositoryProvider).cancel(transfer.id);
-      _refreshAll(ref);
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Gagal: $e')));
+      _refreshAll();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Pengiriman ${transfer.transferCode} berhasil dibatalkan.')),
+        );
       }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(backgroundColor: HtiColors.statusBroken, content: Text('Gagal: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
+    final transfer = widget.transfer;
+    final user = widget.user;
     final isInTransit = transfer.status == 'IN_TRANSIT';
+    final isUnsafeGear = transfer.conditionStatus == 'BROKEN' || transfer.conditionStatus == 'SERVICE';
     final canReceiveOrReject =
         isInTransit && (user?.canWriteLocation(transfer.toLocationId, allowFieldTech: true) ?? false);
     final canCancel =
@@ -278,6 +319,27 @@ class _TransferCard extends ConsumerWidget {
               '${transfer.itemCode} — ${transfer.itemDescription}',
               style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
             ),
+            if (isUnsafeGear && isInTransit) ...[
+              const SizedBox(height: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: HtiColors.statusBroken.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.warning_amber_rounded, size: 15, color: HtiColors.statusBroken),
+                    SizedBox(width: 5),
+                    Text(
+                      'PERINGATAN K3: Alat Tidak Layak Operasi (Servis/Karantina)',
+                      style: TextStyle(color: HtiColors.statusBroken, fontSize: 11.5, fontWeight: FontWeight.w700),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 6),
             Wrap(
               spacing: 8,
@@ -308,32 +370,35 @@ class _TransferCard extends ConsumerWidget {
             ],
             if (canReceiveOrReject || canCancel) ...[
               const SizedBox(height: 12),
-              Wrap(
-                spacing: 10,
-                runSpacing: 8,
-                children: [
-                  if (canReceiveOrReject)
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(backgroundColor: HtiColors.statusGood),
-                      onPressed: () => _handleReceive(context, ref),
-                      icon: const Icon(Icons.check_circle_outline),
-                      label: const Text('Konfirmasi Terima'),
-                    ),
-                  if (canReceiveOrReject)
-                    OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(foregroundColor: HtiColors.statusBroken),
-                      onPressed: () => _handleReject(context, ref),
-                      icon: const Icon(Icons.cancel_outlined),
-                      label: const Text('Tolak'),
-                    ),
-                  if (canCancel)
-                    OutlinedButton.icon(
-                      onPressed: () => _handleCancel(context, ref),
-                      icon: const Icon(Icons.undo),
-                      label: const Text('Batalkan Pengiriman'),
-                    ),
-                ],
-              ),
+              if (_busy)
+                const LinearProgressIndicator()
+              else
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 8,
+                  children: [
+                    if (canReceiveOrReject)
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(backgroundColor: HtiColors.statusGood),
+                        onPressed: _handleReceive,
+                        icon: const Icon(Icons.check_circle_outline),
+                        label: const Text('Konfirmasi Terima'),
+                      ),
+                    if (canReceiveOrReject)
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(foregroundColor: HtiColors.statusBroken),
+                        onPressed: _handleReject,
+                        icon: const Icon(Icons.cancel_outlined),
+                        label: const Text('Tolak'),
+                      ),
+                    if (canCancel)
+                      OutlinedButton.icon(
+                        onPressed: _handleCancel,
+                        icon: const Icon(Icons.undo),
+                        label: const Text('Batalkan Pengiriman'),
+                      ),
+                  ],
+                ),
             ],
           ],
         ),

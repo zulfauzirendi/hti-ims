@@ -3,10 +3,21 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import '../../core/theme/app_theme.dart';
+import '../inventory/inventory_providers.dart';
 import 'dashboard_repository.dart';
 
 class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({super.key});
+
+  void _drillDownLocation(BuildContext context, WidgetRef ref, int locationId) {
+    ref.read(inventoryFilterProvider.notifier).state = InventoryFilter(locationId: locationId);
+    context.go('/inventory');
+  }
+
+  void _drillDownCategory(BuildContext context, WidgetRef ref, int categoryId) {
+    ref.read(inventoryFilterProvider.notifier).state = InventoryFilter(categoryId: categoryId);
+    context.go('/inventory');
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -64,7 +75,7 @@ class DashboardScreen extends ConsumerWidget {
                           ),
                         ),
                         Text(
-                          'Distribusi stok real-time lintas 4 lokasi operasional (ISO 9001 & ISO 45001)',
+                          'Ketuk kartu lokasi atau kategori untuk langsung membuka daftar stok terfilter.',
                           style: TextStyle(fontSize: 13, color: Colors.blueGrey),
                         ),
                       ],
@@ -79,12 +90,15 @@ class DashboardScreen extends ConsumerWidget {
               ),
               const SizedBox(height: 16),
 
-              // Alert Transfer Masuk Tertunda
               if (summary.pendingIncomingTransfers > 0) ...[
                 Card(
                   color: HtiColors.statusInTransit.withValues(alpha: 0.08),
                   child: ListTile(
-                    leading: const Icon(Icons.local_shipping_outlined, color: HtiColors.statusInTransit, size: 30),
+                    leading: const Icon(
+                      Icons.local_shipping_outlined,
+                      color: HtiColors.statusInTransit,
+                      size: 30,
+                    ),
                     title: Text(
                       '${summary.pendingIncomingTransfers} Transfer Masuk Menunggu Konfirmasi',
                       style: const TextStyle(fontWeight: FontWeight.bold, color: HtiColors.navyPrimary),
@@ -166,9 +180,16 @@ class DashboardScreen extends ConsumerWidget {
                       crossAxisCount: crossCount,
                       crossAxisSpacing: 12,
                       mainAxisSpacing: 12,
-                      mainAxisExtent: 230,
+                      mainAxisExtent: 232,
                     ),
-                    itemBuilder: (_, idx) => _LocationKpiCard(loc: summary.byLocation[idx], fmt: fmt),
+                    itemBuilder: (_, idx) {
+                      final loc = summary.byLocation[idx];
+                      return _LocationKpiCard(
+                        loc: loc,
+                        fmt: fmt,
+                        onTap: () => _drillDownLocation(context, ref, loc.locationId),
+                      );
+                    },
                   );
                 },
               ),
@@ -185,6 +206,7 @@ class DashboardScreen extends ConsumerWidget {
                     for (var i = 0; i < summary.byCategory.length; i++) ...[
                       if (i > 0) const Divider(height: 1),
                       ListTile(
+                        onTap: () => _drillDownCategory(context, ref, summary.byCategory[i].categoryId),
                         leading: CircleAvatar(
                           backgroundColor: HtiColors.navyPrimary.withValues(alpha: 0.1),
                           child: Text(
@@ -201,13 +223,20 @@ class DashboardScreen extends ConsumerWidget {
                           style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
                         ),
                         subtitle: Text('${fmt.format(summary.byCategory[i].totalItems)} jenis item'),
-                        trailing: Text(
-                          '${fmt.format(summary.byCategory[i].totalUnits)} unit',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w800,
-                            fontSize: 15,
-                            color: HtiColors.navyPrimary,
-                          ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              '${fmt.format(summary.byCategory[i].totalUnits)} unit',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 15,
+                                color: HtiColors.navyPrimary,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            const Icon(Icons.chevron_right, size: 18, color: Colors.blueGrey),
+                          ],
                         ),
                       ),
                     ],
@@ -250,67 +279,129 @@ class _HeroMetric extends StatelessWidget {
 }
 
 class _LocationKpiCard extends StatelessWidget {
-  const _LocationKpiCard({required this.loc, required this.fmt});
+  const _LocationKpiCard({
+    required this.loc,
+    required this.fmt,
+    required this.onTap,
+  });
 
   final LocationSummary loc;
   final NumberFormat fmt;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final isSite = loc.locationType == 'SITE';
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  isSite ? Icons.engineering_outlined : Icons.warehouse_outlined,
-                  color: HtiColors.navyPrimary,
-                  size: 20,
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    loc.name,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    isSite ? Icons.engineering_outlined : Icons.warehouse_outlined,
+                    color: HtiColors.navyPrimary,
+                    size: 20,
                   ),
-                ),
-                Text(
-                  loc.code,
-                  style: const TextStyle(fontSize: 11, color: Colors.blueGrey, fontWeight: FontWeight.w600),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '${fmt.format(loc.total)} unit',
-              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: HtiColors.navyPrimary),
-            ),
-            const SizedBox(height: 6),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(4),
-              child: LinearProgressIndicator(
-                value: loc.goodRatio,
-                minHeight: 6,
-                backgroundColor: HtiColors.statusBroken.withValues(alpha: 0.2),
-                color: HtiColors.statusGood,
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      loc.name,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                    ),
+                  ),
+                  Text(
+                    loc.code,
+                    style: const TextStyle(fontSize: 11, color: Colors.blueGrey, fontWeight: FontWeight.w600),
+                  ),
+                ],
               ),
-            ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: [
-                ConditionStatusBadge(status: 'GOOD', count: loc.good),
-                ConditionStatusBadge(status: 'SERVICE', count: loc.service),
-                ConditionStatusBadge(status: 'BROKEN', count: loc.broken),
-                if (loc.inTransit > 0) ConditionStatusBadge(status: 'IN_TRANSIT', count: loc.inTransit),
-              ],
-            ),
+              const SizedBox(height: 8),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.baseline,
+                textBaseline: TextBaseline.alphabetic,
+                children: [
+                  Text(
+                    '${fmt.format(loc.total)} unit',
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                      color: HtiColors.navyPrimary,
+                    ),
+                  ),
+                  const Spacer(),
+                  const Icon(Icons.open_in_new, size: 15, color: Colors.blueGrey),
+                ],
+              ),
+              const SizedBox(height: 8),
+              // Stacked 3+1 Color K3 Health Bar
+              _StackedHealthBar(
+                good: loc.good,
+                service: loc.service,
+                broken: loc.broken,
+                inTransit: loc.inTransit,
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  ConditionStatusBadge(status: 'GOOD', count: loc.good),
+                  ConditionStatusBadge(status: 'SERVICE', count: loc.service),
+                  ConditionStatusBadge(status: 'BROKEN', count: loc.broken),
+                  if (loc.inTransit > 0) ConditionStatusBadge(status: 'IN_TRANSIT', count: loc.inTransit),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _StackedHealthBar extends StatelessWidget {
+  const _StackedHealthBar({
+    required this.good,
+    required this.service,
+    required this.broken,
+    required this.inTransit,
+  });
+
+  final int good;
+  final int service;
+  final int broken;
+  final int inTransit;
+
+  @override
+  Widget build(BuildContext context) {
+    final total = good + service + broken + inTransit;
+    if (total <= 0) {
+      return Container(
+        height: 8,
+        decoration: BoxDecoration(
+          color: const Color(0xFFE2E8F0),
+          borderRadius: BorderRadius.circular(4),
+        ),
+      );
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(4),
+      child: SizedBox(
+        height: 8,
+        child: Row(
+          children: [
+            if (good > 0) Expanded(flex: good, child: Container(color: HtiColors.statusGood)),
+            if (service > 0) Expanded(flex: service, child: Container(color: HtiColors.statusService)),
+            if (broken > 0) Expanded(flex: broken, child: Container(color: HtiColors.statusBroken)),
+            if (inTransit > 0) Expanded(flex: inTransit, child: Container(color: HtiColors.statusInTransit)),
           ],
         ),
       ),
