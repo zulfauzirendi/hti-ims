@@ -7,6 +7,30 @@ import 'package:path_provider/path_provider.dart';
 import '../../core/network/api_exception.dart';
 import '../../core/network/dio_client.dart';
 
+class StockQtySnapshot {
+  const StockQtySnapshot({
+    required this.good,
+    required this.service,
+    required this.broken,
+    required this.inTransit,
+  });
+
+  final int good;
+  final int service;
+  final int broken;
+  final int inTransit;
+
+  static StockQtySnapshot? tryFromJson(dynamic raw) {
+    if (raw is! Map<String, dynamic>) return null;
+    return StockQtySnapshot(
+      good: (raw['good'] as num?)?.toInt() ?? 0,
+      service: (raw['service'] as num?)?.toInt() ?? 0,
+      broken: (raw['broken'] as num?)?.toInt() ?? 0,
+      inTransit: (raw['in_transit'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
 class StockLogEntry {
   const StockLogEntry({
     required this.id,
@@ -15,6 +39,8 @@ class StockLogEntry {
     required this.actionType,
     this.statusChanged,
     required this.qtyChanged,
+    this.qtyBefore,
+    this.qtyAfter,
     this.fromLocationName,
     this.toLocationName,
     this.jobCode,
@@ -30,6 +56,8 @@ class StockLogEntry {
   final String actionType;
   final String? statusChanged;
   final int qtyChanged;
+  final StockQtySnapshot? qtyBefore;
+  final StockQtySnapshot? qtyAfter;
   final String? fromLocationName;
   final String? toLocationName;
   final String? jobCode;
@@ -38,18 +66,38 @@ class StockLogEntry {
   final String? userName;
   final DateTime createdAt;
 
+  /// Merangkai ringkasan selisih saldo sebelum → sesudah untuk audit cepat ISO 9001
+  String? get snapshotDiffSummary {
+    final before = qtyBefore;
+    final after = qtyAfter;
+    if (after == null) return null;
+    if (before == null) {
+      return 'Saldo Awal: Good ${after.good}, Service ${after.service}, Broken ${after.broken}';
+    }
+    final diffs = <String>[];
+    if (before.good != after.good) diffs.add('Good: ${before.good}→${after.good}');
+    if (before.service != after.service) diffs.add('Service: ${before.service}→${after.service}');
+    if (before.broken != after.broken) diffs.add('Broken: ${before.broken}→${after.broken}');
+    if (before.inTransit != after.inTransit) {
+      diffs.add('In-Transit: ${before.inTransit}→${after.inTransit}');
+    }
+    return diffs.isEmpty ? null : diffs.join(' • ');
+  }
+
   factory StockLogEntry.fromJson(Map<String, dynamic> json) {
-    final item = json['item'] as Map<String, dynamic>;
+    final item = json['item'] as Map<String, dynamic>?;
     final fromLoc = json['fromLocation'] as Map<String, dynamic>?;
     final toLoc = json['toLocation'] as Map<String, dynamic>?;
     final user = json['user'] as Map<String, dynamic>?;
     return StockLogEntry(
       id: (json['id'] as num).toInt(),
-      itemCode: item['itemCode'] as String,
-      itemDescription: item['description'] as String,
+      itemCode: (item?['itemCode'] as String?) ?? '-',
+      itemDescription: (item?['description'] as String?) ?? '-',
       actionType: json['actionType'] as String,
       statusChanged: json['statusChanged'] as String?,
       qtyChanged: (json['qtyChanged'] as num).toInt(),
+      qtyBefore: StockQtySnapshot.tryFromJson(json['qtyBefore']),
+      qtyAfter: StockQtySnapshot.tryFromJson(json['qtyAfter']),
       fromLocationName: fromLoc?['name'] as String?,
       toLocationName: toLoc?['name'] as String?,
       jobCode: json['jobCode'] as String?,
@@ -61,16 +109,73 @@ class StockLogEntry {
   }
 }
 
+class PagedLogsResult {
+  const PagedLogsResult({
+    required this.items,
+    required this.page,
+    required this.limit,
+    required this.total,
+    required this.totalPages,
+  });
+
+  final List<StockLogEntry> items;
+  final int page;
+  final int limit;
+  final int total;
+  final int totalPages;
+}
+
+class LogsFilter {
+  const LogsFilter({
+    this.actionType,
+    this.locationId,
+    this.dateFrom,
+    this.dateTo,
+    this.page = 1,
+  });
+
+  final String? actionType;
+  final int? locationId;
+  final DateTime? dateFrom;
+  final DateTime? dateTo;
+  final int page;
+
+  LogsFilter copyWith({
+    String? Function()? actionType,
+    int? Function()? locationId,
+    DateTime? Function()? dateFrom,
+    DateTime? Function()? dateTo,
+    int? page,
+  }) {
+    return LogsFilter(
+      actionType: actionType != null ? actionType() : this.actionType,
+      locationId: locationId != null ? locationId() : this.locationId,
+      dateFrom: dateFrom != null ? dateFrom() : this.dateFrom,
+      dateTo: dateTo != null ? dateTo() : this.dateTo,
+      page: page ?? this.page,
+    );
+  }
+}
+
+String _formatIsoDateOnly(DateTime d) {
+  final y = d.year.toString().padLeft(4, '0');
+  final m = d.month.toString().padLeft(2, '0');
+  final day = d.day.toString().padLeft(2, '0');
+  return '$y-$m-$day';
+}
+
 class LogsRepository {
   const LogsRepository(this._dio);
 
   final Dio _dio;
 
-  Future<List<StockLogEntry>> fetchLogs({
+  Future<PagedLogsResult> fetchLogs({
     int? locationId,
     String? actionType,
+    DateTime? dateFrom,
+    DateTime? dateTo,
     int page = 1,
-    int limit = 40,
+    int limit = 25,
   }) async {
     try {
       final res = await _dio.get<Map<String, dynamic>>(
@@ -78,12 +183,23 @@ class LogsRepository {
         queryParameters: {
           'locationId': ?locationId,
           if (actionType != null && actionType.isNotEmpty) 'actionType': actionType,
+          if (dateFrom != null) 'dateFrom': _formatIsoDateOnly(dateFrom),
+          if (dateTo != null) 'dateTo': _formatIsoDateOnly(dateTo),
           'page': page,
           'limit': limit,
         },
       );
-      final list = res.data!['data'] as List<dynamic>;
-      return list.map((e) => StockLogEntry.fromJson(e as Map<String, dynamic>)).toList();
+      final list = (res.data!['data'] as List<dynamic>)
+          .map((e) => StockLogEntry.fromJson(e as Map<String, dynamic>))
+          .toList();
+      final meta = (res.data!['meta'] as Map<String, dynamic>?) ?? {};
+      return PagedLogsResult(
+        items: list,
+        page: (meta['page'] as num?)?.toInt() ?? page,
+        limit: (meta['limit'] as num?)?.toInt() ?? limit,
+        total: (meta['total'] as num?)?.toInt() ?? list.length,
+        totalPages: (meta['totalPages'] as num?)?.toInt() ?? 1,
+      );
     } on DioException catch (e) {
       throw ApiException.fromDio(e);
     }
@@ -107,6 +223,8 @@ class LogsRepository {
     required String type,
     required String format,
     int? locationId,
+    DateTime? dateFrom,
+    DateTime? dateTo,
   }) async {
     try {
       final res = await _dio.get<List<int>>(
@@ -115,6 +233,8 @@ class LogsRepository {
           'type': type,
           'format': format,
           'locationId': ?locationId,
+          if (dateFrom != null) 'dateFrom': _formatIsoDateOnly(dateFrom),
+          if (dateTo != null) 'dateTo': _formatIsoDateOnly(dateTo),
         },
         options: Options(responseType: ResponseType.bytes),
       );
@@ -147,11 +267,15 @@ final logsRepositoryProvider = Provider<LogsRepository>((ref) {
   return LogsRepository(ref.watch(dioProvider));
 });
 
-final logActionFilterProvider = StateProvider<String?>((ref) => null);
-final logLocationFilterProvider = StateProvider<int?>((ref) => null);
+final logsFilterProvider = StateProvider<LogsFilter>((ref) => const LogsFilter());
 
-final auditLogsProvider = FutureProvider<List<StockLogEntry>>((ref) {
-  final action = ref.watch(logActionFilterProvider);
-  final locId = ref.watch(logLocationFilterProvider);
-  return ref.watch(logsRepositoryProvider).fetchLogs(locationId: locId, actionType: action);
+final auditLogsProvider = FutureProvider<PagedLogsResult>((ref) {
+  final filter = ref.watch(logsFilterProvider);
+  return ref.watch(logsRepositoryProvider).fetchLogs(
+        locationId: filter.locationId,
+        actionType: filter.actionType,
+        dateFrom: filter.dateFrom,
+        dateTo: filter.dateTo,
+        page: filter.page,
+      );
 });

@@ -6,6 +6,7 @@ import '../../core/models/user_model.dart';
 import '../../core/theme/app_theme.dart';
 import '../auth/auth_controller.dart';
 import 'inventory_providers.dart';
+import 'item_history_sheet.dart';
 import 'stock_action_modals.dart';
 
 class InventoryScreen extends ConsumerStatefulWidget {
@@ -17,6 +18,7 @@ class InventoryScreen extends ConsumerStatefulWidget {
 
 class _InventoryScreenState extends ConsumerState<InventoryScreen> {
   final _searchCtrl = TextEditingController();
+  final _searchFocusNode = FocusNode();
   Timer? _debounce;
 
   @override
@@ -29,10 +31,12 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
   void dispose() {
     _debounce?.cancel();
     _searchCtrl.dispose();
+    _searchFocusNode.dispose();
     super.dispose();
   }
 
   void _onSearchChanged(String value) {
+    setState(() {}); // Memperbarui tombol clear (X) secara instan
     _debounce?.cancel();
     // Debounce 300ms sesuai SRS-CAP-007
     _debounce = Timer(const Duration(milliseconds: 300), () {
@@ -42,13 +46,29 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
     });
   }
 
+  void _showSuccess(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(backgroundColor: HtiColors.statusGood, content: Text(message)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    // Dengarkan sinyal Ctrl+K dari DesktopShell untuk auto-focus bilah pencarian
+    ref.listen<int>(inventorySearchFocusSignalProvider, (prev, next) {
+      if (prev != null && next > prev) {
+        _searchFocusNode.requestFocus();
+      }
+    });
+
     final user = ref.watch(authControllerProvider).user;
     final filter = ref.watch(inventoryFilterProvider);
     final categories = ref.watch(categoriesProvider).valueOrNull ?? const <CategoryRef>[];
     final locations = ref.watch(locationsProvider).valueOrNull ?? const <LocationRef>[];
     final searchAsync = ref.watch(inventorySearchProvider);
+    final hasAnyFilter =
+        filter.categoryId != null || filter.locationId != null || filter.condition != null || filter.query.isNotEmpty;
 
     return Column(
       children: [
@@ -63,12 +83,14 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                   Expanded(
                     child: TextField(
                       controller: _searchCtrl,
+                      focusNode: _searchFocusNode,
                       onChanged: _onSearchChanged,
                       decoration: InputDecoration(
-                        hintText: 'Cari nama alat, spesifikasi, atau SKU (mis. Crane, Grinding, HTI-EQP)...',
+                        hintText: 'Cari nama alat, spesifikasi, atau SKU (Ctrl+K)...',
                         prefixIcon: const Icon(Icons.search),
                         suffixIcon: _searchCtrl.text.isNotEmpty
                             ? IconButton(
+                                tooltip: 'Hapus pencarian',
                                 onPressed: () {
                                   _searchCtrl.clear();
                                   _onSearchChanged('');
@@ -82,7 +104,10 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                   if (user?.isSuperAdmin ?? false) ...[
                     const SizedBox(width: 10),
                     ElevatedButton.icon(
-                      onPressed: () => showCreateItemModal(context, ref, categories),
+                      onPressed: () async {
+                        final ok = await showCreateItemModal(context, ref, categories);
+                        if (ok == true) _showSuccess('Master item baru berhasil dibuat.');
+                      },
                       icon: const Icon(Icons.add),
                       label: const Text('Item Baru'),
                     ),
@@ -94,7 +119,6 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                 scrollDirection: Axis.horizontal,
                 child: Row(
                   children: [
-                    // Quick filter "Lokasi Saya" untuk Admin Gudang & Petugas Lapangan
                     if (user?.assignedLocation != null) ...[
                       FilterChip(
                         selected: filter.locationId == user!.assignedLocation!.id,
@@ -150,6 +174,18 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                             (f) => f.copyWith(condition: () => v, page: 1),
                           ),
                     ),
+                    if (hasAnyFilter) ...[
+                      const SizedBox(width: 8),
+                      TextButton.icon(
+                        onPressed: () {
+                          _searchCtrl.clear();
+                          setState(() {});
+                          ref.read(inventoryFilterProvider.notifier).state = const InventoryFilter();
+                        },
+                        icon: const Icon(Icons.filter_alt_off_outlined, size: 16),
+                        label: const Text('Reset Filter'),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -206,11 +242,11 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                           user: user,
                           allLocations: locations,
                           allCategories: categories,
+                          onActionSuccess: _showSuccess,
                         ),
                       ),
                     ),
                   ),
-                  // Pagination footer
                   Container(
                     color: Colors.white,
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -261,12 +297,14 @@ class _InventoryItemCard extends ConsumerWidget {
     required this.user,
     required this.allLocations,
     required this.allCategories,
+    required this.onActionSuccess,
   });
 
   final InventoryItem item;
   final UserProfile? user;
   final List<LocationRef> allLocations;
   final List<CategoryRef> allCategories;
+  final ValueChanged<String> onActionSuccess;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -332,16 +370,28 @@ class _InventoryItemCard extends ConsumerWidget {
           ),
         ),
         children: [
-          if (user?.isSuperAdmin ?? false) ...[
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            alignment: WrapAlignment.end,
+            children: [
+              TextButton.icon(
+                onPressed: () => showDialog<void>(
+                  context: context,
+                  builder: (_) => ItemHistoryDialog(item: item),
+                ),
+                icon: const Icon(Icons.history_rounded, size: 16),
+                label: const Text('Riwayat Item (10 Log)'),
+              ),
+              if (user?.isSuperAdmin ?? false) ...[
                 TextButton.icon(
-                  onPressed: () => showEditItemModal(context, ref, item, allCategories),
+                  onPressed: () async {
+                    final ok = await showEditItemModal(context, ref, item, allCategories);
+                    if (ok == true) onActionSuccess('Master item ${item.itemCode} berhasil diperbarui.');
+                  },
                   icon: const Icon(Icons.edit_outlined, size: 16),
                   label: const Text('Edit Master Item'),
                 ),
-                const SizedBox(width: 8),
                 TextButton.icon(
                   style: TextButton.styleFrom(foregroundColor: HtiColors.statusBroken),
                   onPressed: () => confirmSoftDeleteItem(context, ref, item),
@@ -349,16 +399,16 @@ class _InventoryItemCard extends ConsumerWidget {
                   label: const Text('Nonaktifkan Item'),
                 ),
               ],
-            ),
-          ],
+            ],
+          ),
           const Divider(),
-          // Breakdown 4 Lokasi Operasional
           for (final st in item.stocks)
             _LocationStockRow(
               item: item,
               stock: st,
               user: user,
               allLocations: allLocations,
+              onActionSuccess: onActionSuccess,
             ),
         ],
       ),
@@ -372,12 +422,14 @@ class _LocationStockRow extends ConsumerWidget {
     required this.stock,
     required this.user,
     required this.allLocations,
+    required this.onActionSuccess,
   });
 
   final InventoryItem item;
   final ItemStockEntry stock;
   final UserProfile? user;
   final List<LocationRef> allLocations;
+  final ValueChanged<String> onActionSuccess;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -440,42 +492,57 @@ class _LocationStockRow extends ConsumerWidget {
               children: [
                 if (canWrite && hasStock)
                   OutlinedButton.icon(
-                    onPressed: () => showDialog<bool>(
-                      context: context,
-                      builder: (_) => ConditionUpdateDialog(item: item, stock: stock),
-                    ),
+                    onPressed: () async {
+                      final ok = await showDialog<bool>(
+                        context: context,
+                        builder: (_) => ConditionUpdateDialog(item: item, stock: stock),
+                      );
+                      if (ok == true) onActionSuccess('Status kondisi ${item.itemCode} berhasil diperbarui.');
+                    },
                     icon: const Icon(Icons.build_outlined, size: 16),
                     label: const Text('Ubah Kondisi'),
                   ),
                 if (canWrite && hasStock && allLocations.length > 1)
                   OutlinedButton.icon(
-                    onPressed: () => showDialog<bool>(
-                      context: context,
-                      builder: (_) => CreateTransferDialog(
-                        item: item,
-                        sourceStock: stock,
-                        allLocations: allLocations,
-                      ),
-                    ),
+                    onPressed: () async {
+                      final ok = await showDialog<bool>(
+                        context: context,
+                        builder: (_) => CreateTransferDialog(
+                          item: item,
+                          sourceStock: stock,
+                          allLocations: allLocations,
+                        ),
+                      );
+                      if (ok == true) onActionSuccess('Pengiriman transfer ${item.itemCode} dibuat (IN_TRANSIT).');
+                    },
                     icon: const Icon(Icons.send_outlined, size: 16),
                     label: const Text('Transfer'),
                   ),
                 if (canWrite && stock.stockId != null)
                   OutlinedButton.icon(
-                    onPressed: () => showRemarksModal(context, ref, item, stock),
+                    onPressed: () async {
+                      final ok = await showRemarksModal(context, ref, item, stock);
+                      if (ok == true) onActionSuccess('Job Code & Remarks berhasil diperbarui.');
+                    },
                     icon: const Icon(Icons.edit_note, size: 16),
                     label: const Text('Job / Remarks'),
                   ),
                 if (canStockIn)
                   OutlinedButton.icon(
-                    onPressed: () => showStockInModal(context, ref, item, stock),
+                    onPressed: () async {
+                      final ok = await showStockInModal(context, ref, item, stock);
+                      if (ok == true) onActionSuccess('Stock In ${item.itemCode} berhasil dicatat.');
+                    },
                     icon: const Icon(Icons.add_box_outlined, size: 16),
                     label: const Text('Stock In'),
                   ),
                 if (canDispose)
                   OutlinedButton.icon(
                     style: OutlinedButton.styleFrom(foregroundColor: HtiColors.statusBroken),
-                    onPressed: () => showDisposalModal(context, ref, item, stock),
+                    onPressed: () async {
+                      final ok = await showDisposalModal(context, ref, item, stock);
+                      if (ok == true) onActionSuccess('Disposal aset rusak ${item.itemCode} berhasil dicatat.');
+                    },
                     icon: const Icon(Icons.delete_forever_outlined, size: 16),
                     label: const Text('Disposal'),
                   ),

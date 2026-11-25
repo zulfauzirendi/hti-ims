@@ -6,6 +6,17 @@ import '../../core/models/inventory_models.dart';
 import '../../core/models/user_model.dart';
 import '../../core/network/api_exception.dart';
 import '../../core/network/dio_client.dart';
+import '../logs/logs_repository.dart';
+
+class ItemDetailResult {
+  const ItemDetailResult({
+    required this.item,
+    required this.recentLogs,
+  });
+
+  final InventoryItem item;
+  final List<StockLogEntry> recentLogs;
+}
 
 class PagedInventoryResult {
   const PagedInventoryResult({
@@ -84,6 +95,24 @@ class InventoryRepository {
       );
     } on DioException catch (e) {
       if (e.type == DioExceptionType.cancel) rethrow;
+      throw ApiException.fromDio(e);
+    }
+  }
+
+  /// Detail item lengkap beserta 10 riwayat log terakhir (GET /api/v1/items/:id)
+  Future<ItemDetailResult> fetchItemDetail(int itemId) async {
+    try {
+      final res = await _dio.get<Map<String, dynamic>>('/api/v1/items/$itemId');
+      final data = res.data!['data'] as Map<String, dynamic>;
+      final item = InventoryItem.fromJson(data);
+      final rawLogs = data['recentLogs'] as List<dynamic>? ?? const [];
+      final logs = rawLogs.map((raw) {
+        final m = Map<String, dynamic>.from(raw as Map<String, dynamic>);
+        m['item'] ??= {'itemCode': item.itemCode, 'description': item.description};
+        return StockLogEntry.fromJson(m);
+      }).toList();
+      return ItemDetailResult(item: item, recentLogs: logs);
+    } on DioException catch (e) {
       throw ApiException.fromDio(e);
     }
   }

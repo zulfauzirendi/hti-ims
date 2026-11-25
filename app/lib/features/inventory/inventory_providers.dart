@@ -46,6 +46,9 @@ final locationsProvider = FutureProvider<List<LocationRef>>((ref) {
 
 final inventoryFilterProvider = StateProvider<InventoryFilter>((ref) => const InventoryFilter());
 
+/// Sinyal pemfokus otomatis bilah pencarian ketika pengguna menekan Ctrl+K di Desktop
+final inventorySearchFocusSignalProvider = StateProvider<int>((ref) => 0);
+
 final inventorySearchProvider = FutureProvider<PagedInventoryResult>((ref) async {
   final filter = ref.watch(inventoryFilterProvider);
   final cancelToken = CancelToken();
